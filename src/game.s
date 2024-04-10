@@ -15,6 +15,8 @@
   .include "./src/definitions.s"
 
   .equ    BLINK_PERIOD, 250
+  .equ    Speed_Stage2, 200
+
 
   .section .text
 
@@ -24,6 +26,14 @@ Main:
   LDR   R4, =game_stage
   LDR   R5, =0
   STR   R5, [R4]
+
+  LDR   R4, =led_index     @ Load address of led_index
+  LDR   R5, =0             @ Set initial LED index(LED 0)
+  STR   R5, [R4]           
+
+  LDR   R4, =countIndex     @ Load address of led_index
+  LDR   R5, =0             
+  STR   R5, [R4]   
 
   @
   @ Prepare GPIO Port E Pin 9 for output (LED LD3)
@@ -136,10 +146,9 @@ Main:
   MOV     R5, #(1<<6)
   STR     R5, [R4]
 
-  @ Nothing else to do in Main
   @ Idle loop forever (welcome to interrupts!!)
 Idle_Loop:
-   
+  
   B     Idle_Loop
   
 End_Main:
@@ -148,7 +157,7 @@ End_Main:
 
 
 @
-@ SysTick interrupt handler (blink LED LD3)
+@ SysTick interrupt handler (blink LED )
 @
   .type  SysTick_Handler, %function
 SysTick_Handler:
@@ -160,6 +169,7 @@ SysTick_Handler:
   ADD   R5, R5, #1                  @ random++
   STR   R5, [R4]                    @ Store random value
 
+@ handle LED Blink base on game stage
 
   LDR   R4, =blink_countdown        @ if (countdown != 0) {
   LDR   R5, [R4]                    @
@@ -176,6 +186,13 @@ SysTick_Handler:
   LDR     R4, [R4]                  @
   CMP     R4, #0                    @     if(game_stage!=0){
   BEQ     .LendIfDelay              @
+  CMP     R4, #1 
+  BEQ     .LStage1
+  CMP     R4, #2                   @ if game stage is 2 
+  BEQ     .LStage2
+
+ .LStage1: 
+
   LDR     R4, =GPIOE_ODR            @         Invert LD3
   LDR     R5, [R4]                  @
   LDR     R8, =target               @         Load target value
@@ -195,12 +212,56 @@ SysTick_Handler:
   STR     R7, [R6]                  @
   CMP     R7, #10                   @       if(blink_count>10){
   BLO     .LendIfDelay              @
+ 
   LDR     R4, =2                    @
   LDR     R5, =game_stage           @           game_stage = 2
   STR     R4, [R5]                  @
-  LDR     R4, =SYSTICK_CSR          @           Stop SysTick timer
-  LDR     R5, =0                    @       }
-  STR     R5, [R4]                  @     }
+
+.LStage2 :
+  LDR     R4, =blink_countdown
+  LDR     R5, =Speed_Stage2
+  STR     R5, [R4]  
+
+.Spin:
+LDR     R4, =led_index            @ Load current LED index
+LDR     R5, [R4]                
+ @Check count = 2
+
+LDR R6, =countIndex           @ Load address of count
+LDR R7, [R6]                  @ Load count value
+CMP R7, #2                    @ Compare count with 2
+BEQ .IncrementIndex          @ If count = 2, increment index and reset count
+
+@Increment count for current value
+ADD R7, R7, #1                @ Increment count
+STR R7, [R6]                  @ Store updated count
+
+@Toggle On/Off
+LDR R8, =GPIOE_ODR            @ Load GPIOE output data register
+LDR R9, [R8]                  @ Load current state of GPIOE output pins
+MOV R10, #1                   @ Set mask for current LED
+LSL R10, R5                   @ Left shift mask by LED index
+EOR R9, R10                   @ Toggle LED state
+STR R9, [R8]                  @ Update GPIOE output data register with toggled state
+
+@Exit
+B .LendIfDelay             @ Exit Stage 2 logic
+
+.IncrementIndex:              @ add function to reset once reached 15 
+CMP R5, #16
+BEQ .reset 
+ADD R5, R5, #1                @ Increment current index
+STR R5, [R4]                  @ Store updated LED index
+MOV R7, #0                    @ Reset count
+STR R7, [R6]                  @ Store reset count value
+B .LendIfDelay                @ Exit Stage 2 logic
+
+.reset: 
+MOV R5,  #8                   @ reset LD
+STR R5, [R4]                  @ Store updated LED index
+MOV R7, #0                    @ Reset count
+STR R7, [R6]                  @ Store reset count value
+B .LendIfDelay                @ Exit Stage 2 logic
 
 .LendIfDelay:                       @ }
 
@@ -218,6 +279,7 @@ SysTick_Handler:
 @   (count button presses)
 @
   .type  EXTI0_IRQHandler, %function
+  
 EXTI0_IRQHandler:
 
   PUSH  {R4-R6,LR}
@@ -238,6 +300,9 @@ EXTI0_IRQHandler:
   LDR   R6, =1                    @    game_stage = 1
   STR   R6, [R5]                  @ }
 
+  LDR   R7, =led_index
+  MOV   R8, #8    @ Set led_index to 8
+  STR   R8, [R7]
   B     .Lreturn
 
   @ Return from interrupt handler
@@ -256,6 +321,12 @@ demo_blink_count:
 
 target:
   .space 4  
+
+led_index:
+  .space 4 
+
+countIndex:
+  .space 4
 
 blink_countdown:
   .space  4
